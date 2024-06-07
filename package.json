@@ -1,0 +1,67 @@
+{
+  "name": "linguagen",
+  "version": "1.0.0",
+  "description": "A simple project to retrieve a random word and translate it in a predefined language",
+  "main": "dist/index.js",
+  "files": [
+    "dist/"
+  ],
+  "pre-commit": [
+    "rm-build",
+    "build",
+    "add-build"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "ts-node src/index.ts",
+    "dev:start": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
+    "rm-build": "rimraf dist",
+    "build": "tsc",
+    "add-build": "git add dist",
+    "format": "prettier --write \"src/**/*.[tj]s\"",
+    "lint": "eslint ",
+    "prepublishOnly": "npm test && npm run lint",
+    "preversion": "npm run lint",
+    "version": "npm run format && git add -A src",
+    "postversion": "git push && git push --tags"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GridexX/linguagen"
+  },
+  "keywords": [
+    "node",
+    "translation",
+    "translate",
+    "typescript",
+    "generator",
+    "word"
+  ],
+  "author": {
+    "name": "Arsène Fougerouse",
+    "email": "arsene582@gmail.com",
+    "url": "https://github.com/GridexX"
+  },
+  "homepage": "https://github.com/GridexX",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "eslint": "^8.56.0",
+    "eslint-config-airbnb": "^19.0.4",
+    "eslint-config-standard-with-typescript": "^43.0.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-n": "^16.5.0",
+    "eslint-plugin-promise": "^6.1.1",
+    "nodemon": "^3.0.3",
+    "prettier": "^3.1.1",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.15",
+    "axios": "^1.6.7",
+    "zod": "^3.22.4"
+  }
+}
