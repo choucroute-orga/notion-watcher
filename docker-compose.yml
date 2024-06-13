@@ -1,0 +1,9 @@
+services:
+  redis-notion-watcher:
+    image: bitnami/redis
+    container_name: redis-notion-watcher
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT}:6379"
+    environment:
+      - REDIS_PASSWORD
