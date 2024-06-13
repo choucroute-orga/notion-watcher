@@ -1,5 +1,13 @@
 import * as notion from 'notion-types';
-import { NotionBlock, NotionDish, NotionRecipe, RedisRecipe, notionIngredient } from './types';
+import {
+  NotionBlock,
+  NotionDish,
+  NotionPostRecipe,
+  NotionRecipe,
+  RedisRecipe,
+  notionIngredient,
+  redisRecipe,
+} from './types';
 import { createRedisClient } from '../redis';
 import {
   ApiDish,
@@ -276,14 +284,146 @@ export const watchRecipesInNotion = async (
         // console.log(JSON.stringify(ingredients, null, 2));
         // console.log(JSON.stringify(recipePost, null, 2));
         recipe.ingredients = ingredients;
-        await client.set(recipeKey, JSON.stringify(recipe));
-        postRecipe(recipePost).then((res) => {
-          logger.child({ res }).info('Recipe posted successfully');
-        });
+        const result = redisRecipe.safeParse(recipe);
+        if (!result.success) {
+          logger.child({ error: result.error }).error('Recipe not valid');
+          return;
+        } else {
+          await client.set(recipeKey, JSON.stringify(result.data));
+          postRecipe(recipePost).then((res) => {
+            logger.child({ res }).info('Recipe posted successfully');
+          });
+        }
       }
       return;
     }),
   );
 
   return;
+};
+
+const redisToNotionDish = (dish: ApiDish): NotionDish => {
+  switch (dish) {
+    case 'starter':
+      return { name: '🥗Starter' };
+    case 'main':
+      return { name: '🍲Main' };
+    case 'dessert':
+      return { name: '🍮Dessert' };
+    default:
+      return { name: '🍲Main' };
+  }
+};
+
+const transformRedisRecipeToNotion = (recipe: RedisRecipe): NotionPostRecipe => ({
+  properties: {
+    Description: {
+      id: '',
+      type: 'rich_text',
+      rich_text: [
+        {
+          type: 'text',
+          text: {
+            content: recipe.description,
+          },
+          plain_text: recipe.description,
+        },
+      ],
+    },
+    Dish: {
+      select: redisToNotionDish(recipe.dish),
+    },
+    Name: {
+      title: [
+        {
+          type: 'text',
+          text: {
+            content: recipe.name,
+          },
+          plain_text: recipe.name,
+        },
+      ],
+    },
+    ID: {
+      id: '',
+      type: 'rich_text',
+      rich_text: [
+        {
+          type: 'text',
+          text: {
+            content: recipe.id,
+          },
+          plain_text: recipe.id,
+        },
+      ],
+    },
+    Cooking: {
+      number: recipe.cooking ?? 0,
+    },
+    '🍅 Ingredients List': {
+      relation: recipe.ingredientsID.map((ing) => ({ id: ing })),
+    },
+    AddToList: {
+      checkbox: false,
+    },
+    Preparation: {
+      number: recipe.preparation ?? 0,
+    },
+    Servings: {
+      number: recipe.servings ?? 0,
+    },
+    Author: {
+      id: '',
+      type: 'rich_text',
+      rich_text: [
+        {
+          type: 'text',
+          text: {
+            content: recipe.author,
+          },
+          plain_text: recipe.author,
+        },
+      ],
+    },
+  },
+});
+
+const createRecipe = async (notion: any, recipe: NotionPostRecipe) => {
+  return notion.pages.create(recipe);
+};
+
+// This function watches the new recipes created from the API and create them in Notion
+export const watchRecipesInRedis = async (
+  logger: Logger<never>,
+  notion: any,
+  client: RedisClientType<RedisModules, RedisFunctions, RedisScripts>,
+) => {
+  // Get all keys that start with new_recipe
+  // For each key, we get the recipe
+  // We create the recipe in Notion
+  logger = logger.child({ function: 'watchRecipesInRedis' });
+  const keys = await client.keys('new_recipe:*');
+  keys.map(async (key) => {
+    const recipe = await client.get(key);
+    const recipeObject = JSON.parse(recipe ?? '{}');
+    const result = redisRecipe.safeParse(recipeObject);
+    if (!result.success) {
+      logger.child({ error: result.error }).error('Recipe not valid');
+    } else {
+      const { data } = result;
+      const notionRecipe = transformRedisRecipeToNotion(data);
+      // Create the recipe in Notion
+      await createRecipe(notion, notionRecipe)
+        .then((res: any) => {
+          res.logger.info('New recipe created in Notion');
+        })
+        .catch((err) => {
+          logger.child({ err }).error('Error creating Recipe in Notion');
+        });
+      // Delete the key in Redis
+      await client.del(key).catch((err) => {
+        logger.child({ err }).error('Error deleting key in Redis');
+      });
+    }
+  });
 };
