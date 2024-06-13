@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IngredientPostRequest } from '../api/types';
 
 // This type is a simplified version of the Recipe in the Notion API. Used to convert the recipe data from the Notion API to the recipe data used in the app.
 export type RedisRecipe = {
@@ -10,11 +11,12 @@ export type RedisRecipe = {
   description: string;
   preparation?: number;
   cooking?: number;
+  ingredients: IngredientPostRequest[];
   ingredientsID: string[];
   last_edited_time: string;
   created_time: string;
   addToList: boolean;
-  dish?: '🥗Starter' | '🍲Main' | '🍮Dessert';
+  dish: 'starter' | 'main' | 'dessert';
 };
 
 export const IngredientTypes = [
@@ -165,6 +167,10 @@ export const notionIngredient = z.object({
 
 export type NotionIngredient = z.infer<typeof notionIngredient>;
 
+export const notionDish = z.object({
+  name: z.enum(['🥗Starter', '🍲Main', '🍮Dessert']),
+});
+export type NotionDish = z.infer<typeof notionDish>;
 const recipe = z.object({
   id: z.string(),
   properties: z.object({
@@ -173,11 +179,7 @@ const recipe = z.object({
       created_time: z.string(),
     }),
     Dish: z.object({
-      select: z
-        .object({
-          name: z.enum(['🥗Starter', '🍲Main', '🍮Dessert']),
-        })
-        .nullable(),
+      select: notionDish.nullable(),
     }),
     Name: z.object({
       title: z.array(notionText),

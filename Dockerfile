@@ -8,8 +8,8 @@ COPY dist dist
 
 RUN npm ci --only=production
 
-ENV NOTION_API_URL=https://api.notion.com/v1/
-ENV API_URL
+ENV NOTION_API_URL https://api.notion.com/v1/
+ENV API_URL localhost:3000
 
 # Run the application
-ENTRYPOINT ["node", "out"]
+ENTRYPOINT ["node", "dist"]

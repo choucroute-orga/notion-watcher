@@ -1,7 +1,7 @@
 {
-  "name": "linguagen",
+  "name": "notion-watcher",
   "version": "1.0.0",
-  "description": "A simple project to retrieve a random word and translate it in a predefined language",
+  "description": "A Program that uses Notion as a CRM and watches for changes in the database",
   "main": "dist/index.js",
   "files": [
     "dist/"
@@ -14,7 +14,7 @@
   "scripts": {
     "test": "jest --config jestconfig.json",
     "start": "ts-node src/index.ts",
-    "dev:start": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
+    "dev:start": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts | pino-pretty",
     "rm-build": "rimraf dist",
     "build": "tsc",
     "add-build": "git add dist",
@@ -57,6 +57,7 @@
     "jest": "^29.7.0",
     "nodemon": "^3.0.3",
     "notion-types": "^6.16.0",
+    "pino-pretty": "^11.2.1",
     "prettier": "^3.1.1",
     "rimraf": "^5.0.5",
     "ts-jest": "^29.1.4",
@@ -67,6 +68,7 @@
     "@notionhq/client": "^2.2.15",
     "@redis/client": "^1.5.16",
     "axios": "^1.6.7",
+    "pino": "^9.2.0",
     "zod": "^3.22.4"
   }
 }

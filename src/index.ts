@@ -2,8 +2,10 @@ const { Client } = require('@notionhq/client');
 import * as notion_types from 'notion-types';
 import { IngredientTypes } from './models';
 import { getIngredients } from './api/query';
-import { retrieveRecipesIDs } from './notion';
+import { retrieveRecipesIDs, watchRecipesInNotion } from './notion';
 import { IngredientDB, RecipeDB, ShoppingListDB, getShoppingListDBProps } from './notion/types';
+import { createRedisClient } from './redis';
+import * as pino from 'pino';
 // import { retrieveRecipes } from './notion';
 
 const notion = new Client({ auth: process.env.NOTION_API_KEY });
@@ -158,17 +160,23 @@ const main = async () => {
   // Create the relation between the recipe and the ingredients
 
   // await createShoppingListDB(recipeID, ingID);
+  const client = await createRedisClient();
+  const logger = pino.default();
+  logger.info('Starting the notion watcher loop');
+  await watchRecipesInNotion(logger, notion, client);
+  client.disconnect();
 
   // insertIngredients(ingID);
 };
 
 // Create a loop that watch the recipes database and create a shopping list for each recipe
 
-const loop = async () => {
-  // watchRecipesInNotion();
-  await new Promise((resolve) => setTimeout(resolve, 5000));
-  loop();
-};
+// const loop = async () => {
+//   // watchRecipesInNotion();
+//   await new Promise((resolve) => setTimeout(resolve, 5000));
+//   loop();
+// };
 
-retrieveRecipesIDs(notion, '49c22ed91a644251ab2e682d771db25f');
+// retrieveRecipesIDs(notion, '49c22ed91a644251ab2e682d771db25f');
 // loop();
+main();

@@ -13,24 +13,7 @@ export const ingredientType = z.enum([
   'other',
 ]);
 
-export const ingredientUnit = z.enum([
-  'g',
-  'kg',
-  'ml',
-  'l',
-  'u',
-  'tbsp',
-  'tsp',
-  'cup',
-  'pint',
-  'quart',
-  'gallon',
-  'oz',
-  'lb',
-  'mg',
-  'mcg',
-  'unit',
-]);
+export const ingredientUnit = z.enum(['g', 'kg', 'ml', 'l', 'u', 'tbsp', 'tsp', 'cup', 'mg', 'unit']);
 
 export type IngredientUnit = z.infer<typeof ingredientUnit>;
 
@@ -61,12 +44,14 @@ export const ingredientPostRequest = z.object({
 
 export type IngredientPostRequest = z.infer<typeof ingredientPostRequest>;
 
+const apiDish = z.enum(['starter', 'main', 'dessert']);
+export type ApiDish = z.infer<typeof apiDish>;
 export const recipePostRequest = z.object({
   id: z.string(),
   name: z.string(),
   author: z.string(),
   description: z.string(),
-  dish: z.enum(['main', 'side', 'dessert']),
+  dish: apiDish,
   servings: z.number().min(1),
   metadata: z.object({ 'cook time': z.string() }),
   timers: z.array(z.object({ name: z.string(), amount: z.number(), unit: z.string() })),

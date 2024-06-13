@@ -1,7 +1,18 @@
 import * as notion from 'notion-types';
-import { NotionBlock, NotionRecipe, RedisRecipe, notionIngredient } from './types';
+import { NotionBlock, NotionDish, NotionRecipe, RedisRecipe, notionIngredient } from './types';
 import { createRedisClient } from '../redis';
-import { IngredientPostRequest, IngredientUnit, RecipePostRequest, ingredient, ingredientUnit } from '../api/types';
+import {
+  ApiDish,
+  IngredientPostRequest,
+  IngredientUnit,
+  RecipePostRequest,
+  ingredient,
+  ingredientUnit,
+} from '../api/types';
+import { postRecipe } from '../api/query';
+import RedisClient, { RedisClientType } from '@redis/client/dist/lib/client';
+import { RedisFunctions, RedisModules, RedisScripts } from '@redis/client';
+import { Logger } from 'pino';
 
 export const retrieveRecipesIDs = async (notion: any, recipeID: string) => {
   let response = await notion.databases.query({
@@ -30,7 +41,20 @@ type RecipeResult = {
 
 export const getRecipeResult = () => {};
 
-export const transformRecipe = (recipe: NotionRecipe): RedisRecipe => ({
+export const notionDishToApiDish = (dish?: NotionDish): ApiDish => {
+  switch (dish?.name ?? '🍲Main') {
+    case '🥗Starter':
+      return 'starter';
+    case '🍲Main':
+      return 'main';
+    case '🍮Dessert':
+      return 'dessert';
+    default:
+      return 'main';
+  }
+};
+
+export const transformRecipe = (recipe: NotionRecipe, ingredients?: IngredientPostRequest[]): RedisRecipe => ({
   notionID: recipe.id,
   id: recipe.properties.ID.rich_text.at(0)?.text?.content ?? '',
   author: recipe.properties.Author.rich_text.at(0)?.text?.content ?? '',
@@ -38,15 +62,20 @@ export const transformRecipe = (recipe: NotionRecipe): RedisRecipe => ({
   description: recipe.properties.Description.rich_text.at(0)?.text?.content ?? '',
   created_time: recipe.properties['Created time'].created_time,
   last_edited_time: recipe.properties['Last edited time'].last_edited_time,
-  dish: recipe.properties.Dish.select?.name ?? '🍲Main',
+  dish: notionDishToApiDish(recipe.properties.Dish.select ?? undefined),
   addToList: recipe.properties.AddToList.checkbox,
   preparation: recipe.properties.Preparation.number ?? 0,
   servings: recipe.properties.Servings.number ?? 0,
   cooking: recipe.properties.Cooking.number ?? 0,
   ingredientsID: recipe.properties['🍅 Ingredients List'].relation.map((ingredient) => ingredient.id),
+  ingredients: ingredients ?? [],
 });
 
-export const transformRedisToApi = (recipe: RedisRecipe, steps: string[]): RecipePostRequest => ({
+export const transformRedisToApi = (
+  recipe: RedisRecipe,
+  steps: string[],
+  ingredients: IngredientPostRequest[],
+): RecipePostRequest => ({
   author: recipe.author,
   name: recipe.name,
   description: recipe.description,
@@ -65,15 +94,15 @@ export const transformRedisToApi = (recipe: RedisRecipe, steps: string[]): Recip
       unit: 'minutes',
     },
   ],
-  ingredients: [],
-  dish: 'main',
+  ingredients,
+  dish: recipe.dish,
   metadata: { 'cook time': `${recipe.cooking ?? 0}` },
   steps,
 });
 
 // Ingredients are stored in bulleted list
 // And are written in the format AmountUnit Ingredient
-const retrieveIngredientsInBlocks = (blocks: NotionBlock[]): string[] => {
+const retrieveIngredientsFromBlocks = (blocks: NotionBlock[]): string[] => {
   // Find the index of the block Heading3 that contains the word Ingredients
   const ingredientsIndex = blocks.findIndex(
     (block) => block.type === 'heading_3' && block.heading_3.rich_text[0].plain_text === 'Ingredients',
@@ -91,18 +120,20 @@ const retrieveIngredientsInBlocks = (blocks: NotionBlock[]): string[] => {
   return ingredients;
 };
 
-const retrieveStepsInBlocks = (blocks: NotionBlock[]) => {
+const retrieveStepsFromBlocks = (blocks: NotionBlock[]): string[] => {
   const stepIndex = blocks.findIndex(
     (block) => block.type === 'heading_3' && block.heading_3.rich_text[0].plain_text === 'Steps',
   );
-  const stepsBlocks: NotionBlock[] = [];
+  const steps: string[] = [];
   for (let i = stepIndex + 1; i < blocks.length; i++) {
-    if (blocks[i].type !== 'numbered_list_item') {
+    const block = blocks[i];
+    if (block.type !== 'numbered_list_item') {
       break;
+    } else {
+      steps.push(block.numbered_list_item.rich_text[0].plain_text);
     }
-    stepsBlocks.push(blocks[i]);
   }
-  return stepsBlocks;
+  return steps;
 };
 
 const retrieveIngredientFromNotion = async (notion: any, notionIngredientId: string) => {
@@ -114,14 +145,16 @@ const retrieveIngredientFromNotion = async (notion: any, notionIngredientId: str
 };
 
 export const buildIngredientArray = async (
+  logger: Logger<never>,
   notion: any,
   ingredients: string[],
-  ingredientRelation: { id: string }[],
+  ingredientRelation: string[],
 ) => {
+  logger = logger.child({ function: 'buildIngredientArray' });
   const ingRequest: IngredientPostRequest[] = [];
 
   let iS = ingredientRelation.map(async (i) => {
-    const is = await retrieveIngredientFromNotion(notion, i.id);
+    const is = await retrieveIngredientFromNotion(notion, i);
     return is;
   });
 
@@ -129,25 +162,30 @@ export const buildIngredientArray = async (
 
   ingredients.forEach((sentence) => {
     // Find the name that correspond in the iR list
-
+    logger = logger.child({ sentence });
     // Extract then name of the ingredient from the block
     // THe block is is the format of "Amount Unit Ingredient" where Amount is a number, unit is one of the units and ingredient is the name of the ingredient
     // We split the string by space and extract the last element
-    // const regex =
-    // /^(\d+(?:[/\/]\d+|\.\d+)?)\s*(?:(g|kg|ml|l|unité|unit|pièce|pcs|pc|oz|lb|cl|cc|cs|cuillère|cuil|c|à|s|M|G|mL|L|oz|lb|càs|c.à.s|c.s|cs|c.à.c|c.c|cc|pincée|pinçée|goutte|gttes|filet|flets|zeste|zestes|tranche|tranches|rondelle|rondelles|bouquet|brin|brins|feuille|feuilles)\s)?\s*(?:de|d')?\s*(.+)$/i;
-    // const match = sentence.toLowerCase().match(regex);
-    // const regex =
-    //   /^(\d+(?:[/\/]\d+|\.\d+)?)\s*((?:g|kg|l|ml|cs|cc|pcs|pièce))\s*(?:g|kg|ml|l|unité|unit|pièce|pcs|pc|oz|lb|cl|cc|cs|cuillère|cuil|c|à|s|M|G|mL|L|oz|lb|càs|c.à.s|c.s|cs|c.à.c|c.c|cc|pincée|pinçée|goutte|gttes|filet|flets|zeste|zestes|tranche|tranches|rondelle|rondelles|bouquet|brin|brins|feuille|feuilles\s)?\s*(?:de|d')?\s*(.+)$/i;
-    const regex = /^(\d+(?:[/\/]\d+|\.\d+)?)\s*(?:(g|kg|ml|l|cs|cas|cc)\s)?\s*(?:de|d')?\s*(.+)$/i;
+    const regex = /^(\d+(?:[/\/]\d+|\.\d+)?)\s*(?:(mg|g|kg|ml|l|cs|cas|cc|cac)\s)?\s*(?:de|d')?\s*(.+)$/i;
     const match = sentence.toLowerCase().match(regex);
     if (!match) {
-      console.error(`No match found for sentence ${sentence}`);
+      logger.error(`No match found for sentence ${sentence}`);
     }
     const amount = parseInt(match?.[1] ?? '0');
-    const unit = (match?.[2] || 'unit') as IngredientUnit;
+    const unitStr = match?.[2] || 'unit';
+    let unit = unitStr as IngredientUnit;
+    switch (unitStr) {
+      case 'cas' || 'cs':
+        unit = 'tbsp';
+        break;
+      case 'cc' || 'cac':
+        unit = 'tsp';
+        break;
+      default:
+        break;
+    }
     const ingredient = match?.[3] ?? '';
-    console.log(`Amount: ${amount}, Unit: ${unit}, Ingredient: ${ingredient}`);
-
+    logger.child({ amount, unit, ingredient });
     // Remove de and d' from the ingredient name and take thes last letter
     // TODO Improve, might fail with plural names
 
@@ -168,15 +206,14 @@ export const buildIngredientArray = async (
     // We should neutr
     const ir = iR.find((ing) => ing.properties.Name.title[0].plain_text.toLowerCase().includes(ingName.toLowerCase()));
     if (ir) {
-      console.log(`Ingredient ${ingName} found: ${ir}`);
+      logger.child({ ingName, ir }).debug('Ingredient found');
       ingRequest.push({
         id: ir.properties.ID.rich_text[0].plain_text,
         amount,
         unit,
       });
     } else {
-      // Try with the
-      console.log(`Ingredient ${ingName} not found`);
+      logger.child({ ingName }).warn(`Ingredient ${ingName} not found`);
     }
     // For each words we test if we have a match in the iR list.
     // If one ingredient is found, we stop the loop and add the ingredient to the list
@@ -202,29 +239,51 @@ export const buildIngredientArray = async (
 // Each recipe are listed. If the Edited time is the same, then the recipe is the same.
 // If the last edited time is different, then the recipe is different. So, we compare both with the backend.
 
-const watchRecipesInNotion = async (notion: any) => {
+export const watchRecipesInNotion = async (
+  logger: Logger<never>,
+  notion: any,
+  client: RedisClientType<RedisModules, RedisFunctions, RedisScripts>,
+) => {
+  logger.child({ function: 'watchRecipesInNotion' });
   const recipesDBID = '49c22ed91a644251ab2e682d771db25f';
   const response = (await notion.databases.query({
     database_id: recipesDBID,
   })) as { results: NotionRecipe[] };
-  console.log(JSON.stringify(response, null, 2));
-
+  // console.log(JSON.stringify(response, null, 2));
+  logger.child({ recipes: response.results.length }).debug('Recipes found in Notion');
+  // Transform Notion Recipe to recipes ready to be stored in Redis
   const recipes: RedisRecipe[] = response.results.map((r) => transformRecipe(r));
-  const client = await createRedisClient();
-  recipes.forEach(async (recipe) => {
-    const recipeKey = `recipe:${recipe.id}:${recipe.last_edited_time}`;
-    const recipeExists = await client.get(recipeKey);
-    if (!recipeExists) {
-      // Remove the old recipe
-      await client.del(`recipe:${recipe.id}:*`);
-      // Retrieve the ingredients from the blocks content
-      const response = await notion.blocks.children.list({
-        block_id: recipe.notionID,
-        page_size: 100,
-      });
-      const ingBlocks = retrieveIngredientsInBlocks(response.results);
-      const stepsBlocks = retrieveStepsInBlocks(response.results);
-      await client.set(recipeKey, JSON.stringify(recipe));
-    }
-  });
+
+  await Promise.all(
+    recipes.map(async (recipe) => {
+      const recipeKey = `recipe:${recipe.id}:${recipe.last_edited_time}`;
+      const recipeExists = await client.get(recipeKey);
+      if (!recipeExists) {
+        logger.child({ recipe: recipe.id }).info("Recipe doesn't exist in Redis, creating it");
+        // Remove the old recipe
+        await client.del(`recipe:${recipe.id}:*`).catch((err) => {
+          logger.error(err);
+        });
+        // Retrieve the ingredients from the blocks content
+        const response = await notion.blocks.children.list({
+          block_id: recipe.notionID,
+          page_size: 100,
+        });
+        const ingStr = retrieveIngredientsFromBlocks(response.results);
+        const steps = retrieveStepsFromBlocks(response.results);
+        const ingredients = await buildIngredientArray(logger, notion, ingStr, recipe.ingredientsID);
+        const recipePost = transformRedisToApi(recipe, steps, ingredients);
+        // console.log(JSON.stringify(ingredients, null, 2));
+        // console.log(JSON.stringify(recipePost, null, 2));
+        recipe.ingredients = ingredients;
+        await client.set(recipeKey, JSON.stringify(recipe));
+        postRecipe(recipePost).then((res) => {
+          logger.child({ res }).info('Recipe posted successfully');
+        });
+      }
+      return;
+    }),
+  );
+
+  return;
 };

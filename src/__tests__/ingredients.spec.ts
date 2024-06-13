@@ -1,6 +1,7 @@
 import { Client } from '@notionhq/client';
 import { describe, it } from 'node:test';
 import { buildIngredientArray } from '../notion';
+import { pino } from 'pino';
 
 describe('Tests related to ingredients', () => {
   test('should parse the ingredient', async () => {
@@ -15,29 +16,16 @@ describe('Tests related to ingredients', () => {
       '400g de spaghettis',
     ];
     const relation = [
-      {
-        id: '602b3c67-6e4f-44bf-b28e-5023287b0f26',
-      },
-      {
-        id: '0f9ebd03-139c-4eb6-874f-1f22b78b40ec',
-      },
-      {
-        id: '7149d39c-d8bb-4658-baf4-97e913c67ed4',
-      },
-      {
-        id: '51eaa685-33e9-4669-99ba-2a5307af4c48',
-      },
-      {
-        id: 'df5badb7-6d89-460a-9490-6d695436fd2f',
-      },
-      {
-        id: '39a1d3b3-aa3a-42a7-874e-6ddc1d700adb',
-      },
-      {
-        id: '95d48bb9-bb4e-4588-96dd-fc8a7c8ea7c8',
-      },
+      '602b3c67-6e4f-44bf-b28e-5023287b0f26',
+      '0f9ebd03-139c-4eb6-874f-1f22b78b40ec',
+      '7149d39c-d8bb-4658-baf4-97e913c67ed4',
+      '51eaa685-33e9-4669-99ba-2a5307af4c48',
+      'df5badb7-6d89-460a-9490-6d695436fd2f',
+      '39a1d3b3-aa3a-42a7-874e-6ddc1d700adb',
+      '95d48bb9-bb4e-4588-96dd-fc8a7c8ea7c8',
     ];
-    const ingRequests = await buildIngredientArray(notion, ingredients, relation);
+    const logger = pino();
+    const ingRequests = await buildIngredientArray(logger, notion, ingredients, relation);
     expect(ingRequests).toEqual([
       { id: '5a763678baae5e00142c578f', amount: 200, unit: 'g' },
       { id: '620c1a72a024d80dfe318dcb', amount: 2, unit: 'unit' },
