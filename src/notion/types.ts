@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { IngredientPostRequest, ingredientPostRequest } from '../api/types';
 
+const n = z.object({ name: z.string(), notionId: z.string().length(24) });
+const ingredientRedis = z.array(ingredientPostRequest.merge(n));
+
+export type IngredientRedis = z.infer<typeof ingredientRedis>;
 // This type is a simplified version of the Recipe in the Notion API. Used to convert the recipe data from the Notion API to the recipe data used in the app.
 export const redisRecipe = z.object({
   notionID: z.string(),
@@ -11,12 +15,13 @@ export const redisRecipe = z.object({
   description: z.string(),
   preparation: z.number().optional(),
   cooking: z.number().optional(),
-  ingredients: z.array(ingredientPostRequest),
+  ingredients: ingredientPostRequest.array(),
   ingredientsID: z.array(z.string()),
   last_edited_time: z.string().datetime(),
   created_time: z.string().datetime(),
   addToList: z.boolean(),
   dish: z.enum(['starter', 'main', 'dessert']),
+  steps: z.array(z.string()).optional(),
 });
 
 export type RedisRecipe = z.infer<typeof redisRecipe>;
@@ -219,7 +224,13 @@ const recipe = z.object({
 export type NotionRecipe = z.infer<typeof recipe>;
 
 const notionPostRecipeProperties = notionRecipeProperties.omit({ 'Created time': true, 'Last edited time': true });
-const notionPostRecipe = z.object({ properties: notionPostRecipeProperties });
+const notionPostRecipe = z.object({
+  parent: z.object({
+    type: z.enum(['database_id']),
+    database_id: z.string(),
+  }),
+  properties: notionPostRecipeProperties,
+});
 export type NotionPostRecipe = z.infer<typeof notionPostRecipe>;
 
 export const RecipeDB = {

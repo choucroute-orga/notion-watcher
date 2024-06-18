@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "test": "jest --config jestconfig.json",
-    "start": "ts-node src/index.ts",
+    "start": "ts-node --detectOpenHandles src/index.ts",
     "dev:start": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts | pino-pretty",
     "rm-build": "rimraf dist",
     "build": "tsc",

@@ -1,5 +1,6 @@
 import * as notion from 'notion-types';
 import {
+  IngredientRedis,
   NotionBlock,
   NotionDish,
   NotionPostRecipe,
@@ -266,6 +267,7 @@ export const watchRecipesInNotion = async (
     recipes.map(async (recipe) => {
       const recipeKey = `recipe:${recipe.id}:${recipe.last_edited_time}`;
       const recipeExists = await client.get(recipeKey);
+      // TODO use it in another function
       if (!recipeExists) {
         logger.child({ recipe: recipe.id }).info("Recipe doesn't exist in Redis, creating it");
         // Remove the old recipe
@@ -315,10 +317,13 @@ const redisToNotionDish = (dish: ApiDish): NotionDish => {
   }
 };
 
-const transformRedisRecipeToNotion = (recipe: RedisRecipe): NotionPostRecipe => ({
+const transformRedisRecipeToNotion = (recipeDbId: string, recipe: RedisRecipe): NotionPostRecipe => ({
+  parent: {
+    type: 'database_id',
+    database_id: recipeDbId,
+  },
   properties: {
     Description: {
-      id: '',
       type: 'rich_text',
       rich_text: [
         {
@@ -345,7 +350,6 @@ const transformRedisRecipeToNotion = (recipe: RedisRecipe): NotionPostRecipe => 
       ],
     },
     ID: {
-      id: '',
       type: 'rich_text',
       rich_text: [
         {
@@ -373,7 +377,6 @@ const transformRedisRecipeToNotion = (recipe: RedisRecipe): NotionPostRecipe => 
       number: recipe.servings ?? 0,
     },
     Author: {
-      id: '',
       type: 'rich_text',
       rich_text: [
         {
@@ -388,8 +391,94 @@ const transformRedisRecipeToNotion = (recipe: RedisRecipe): NotionPostRecipe => 
   },
 });
 
+// This function query a Notion Page and retrieve the ID property of it
+export const searchNotionPageWithId = async (
+  notion: any,
+  dbId: string,
+  apiId: string,
+): Promise<{ notionId: string; name: string }> => {
+  const response = (await notion.databases.query({
+    database_id: dbId,
+    filter: {
+      property: 'ID',
+      rich_text: {
+        equals: apiId,
+      },
+    },
+  })) as { results: { id: string; properties: { Name: { title: { plain_text: string }[] } } }[] };
+
+  const { results } = response;
+  if (results.length === 1) {
+    return { notionId: results[0].id, name: results[0].properties.Name.title[0].plain_text };
+  } else {
+    console.log(`Ingredient not found for ${apiId}`);
+  }
+  return { notionId: '', name: '' };
+};
+
+const aggregateIngredients = async (
+  notion: any,
+  dbId: string,
+  ingredients: IngredientPostRequest[],
+): Promise<IngredientRedis> => {
+  return await Promise.all(
+    ingredients.map(async (i) => {
+      const { notionId, name } = await searchNotionPageWithId(notion, dbId, i.id);
+      return { notionId, name, ...i };
+    }),
+  );
+};
+
 const createRecipe = async (notion: any, recipe: NotionPostRecipe) => {
   return notion.pages.create(recipe);
+};
+
+const createMarkdownRecipe = async (
+  notion: any,
+  notionRecipeId: string,
+  ingredients: IngredientRedis,
+  steps: string[],
+) => {
+  const children: any[] = [
+    {
+      heading_3: {
+        rich_text: [
+          {
+            text: {
+              content: 'Ingredients',
+            },
+          },
+        ],
+      },
+    },
+  ];
+
+  ingredients.forEach((i) => {
+    children.push({
+      bulleted_list_item: {
+        rich_text: [{ text: { content: `${i.amount}${i.unit === 'unit' ? '' : i.unit} ${i.name}` } }],
+      },
+    });
+  });
+
+  children.push({
+    heading_3: {
+      rich_text: [{ text: { content: 'Steps' } }],
+    },
+  });
+
+  steps.forEach((s) => {
+    children.push({
+      numbered_list_item: {
+        rich_text: [{ text: { content: `${s}` } }],
+      },
+    });
+  });
+
+  return await notion.blocks.children.append({
+    block_id: notionRecipeId,
+    children,
+  });
 };
 
 // This function watches the new recipes created from the API and create them in Notion
@@ -397,33 +486,47 @@ export const watchRecipesInRedis = async (
   logger: Logger<never>,
   notion: any,
   client: RedisClientType<RedisModules, RedisFunctions, RedisScripts>,
-) => {
+  recipeDbId: string,
+  ingredientDbId: string,
+): Promise<string[]> => {
   // Get all keys that start with new_recipe
   // For each key, we get the recipe
   // We create the recipe in Notion
   logger = logger.child({ function: 'watchRecipesInRedis' });
   const keys = await client.keys('new_recipe:*');
-  keys.map(async (key) => {
-    const recipe = await client.get(key);
-    const recipeObject = JSON.parse(recipe ?? '{}');
-    const result = redisRecipe.safeParse(recipeObject);
-    if (!result.success) {
-      logger.child({ error: result.error }).error('Recipe not valid');
-    } else {
-      const { data } = result;
-      const notionRecipe = transformRedisRecipeToNotion(data);
-      // Create the recipe in Notion
-      await createRecipe(notion, notionRecipe)
-        .then((res: any) => {
-          res.logger.info('New recipe created in Notion');
-        })
-        .catch((err) => {
-          logger.child({ err }).error('Error creating Recipe in Notion');
+  const notionRecipesIds: string[] = [];
+  await Promise.all(
+    keys.map(async (key) => {
+      const recipe = await client.get(key);
+      const recipeObject = JSON.parse(recipe ?? '{}');
+      const result = redisRecipe.safeParse(recipeObject);
+      if (!result.success) {
+        logger.child({ error: result.error }).error('Recipe not valid');
+      } else {
+        const { data: recipe } = result;
+        const aggIng = await aggregateIngredients(notion, ingredientDbId, recipe.ingredients);
+        const notionRecipe = transformRedisRecipeToNotion(recipeDbId, recipe);
+        // TODO Change the content of the Page
+        // Create the recipe in Notion
+        await createRecipe(notion, notionRecipe)
+          .then((res: any) => {
+            notionRecipesIds.push(res.id);
+            logger.child({ id: res.id }).info('New recipe created in Notion');
+            createMarkdownRecipe(notion, res.id, aggIng, recipe.steps ?? []).catch((err) => {
+              logger.child({ err }).error('Error creating Markdown Recipe');
+            });
+            //TODO: Create the recipe in Redis
+          })
+          .catch((err) => {
+            logger.child({ err }).error('Error creating Recipe in Notion');
+          });
+        // Delete the key in Redis
+        await client.del(key).catch((err) => {
+          logger.child({ err }).error('Error deleting key in Redis');
         });
-      // Delete the key in Redis
-      await client.del(key).catch((err) => {
-        logger.child({ err }).error('Error deleting key in Redis');
-      });
-    }
-  });
+      }
+      return;
+    }),
+  );
+  return notionRecipesIds;
 };
