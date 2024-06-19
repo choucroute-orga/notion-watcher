@@ -1,9 +1,8 @@
 import { Client } from '@notionhq/client';
 import { pino } from 'pino';
-import { NotionBlock, RedisRecipe, redisRecipe } from '../notion/types';
+import { NotionBlock, NotionIngredientShoppingList, RedisRecipe, redisRecipe } from '../notion/types';
 import { createRedisClient } from '../redis';
 import { watchRecipesInRedis } from '../notion';
-import { BlockObjectResponse } from '@notionhq/client/build/src/api-endpoints';
 
 describe('Tests related to recipes', () => {
   test('Should retrieve the recipe from Redis', async () => {

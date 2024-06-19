@@ -3,6 +3,8 @@ import {
   IngredientRedis,
   NotionBlock,
   NotionDish,
+  NotionIngredient,
+  NotionIngredientShoppingList,
   NotionPostRecipe,
   NotionRecipe,
   RedisRecipe,
@@ -18,10 +20,12 @@ import {
   ingredient,
   ingredientUnit,
 } from '../api/types';
-import { postRecipe } from '../api/query';
+import { getShoppingList, postRecipe } from '../api/query';
 import RedisClient, { RedisClientType } from '@redis/client/dist/lib/client';
 import { RedisFunctions, RedisModules, RedisScripts } from '@redis/client';
-import { Logger } from 'pino';
+import pino, { Logger } from 'pino';
+import { INGREDIENT_DB_ID, RECIPE_DB_ID, SHOPPING_LIST_PAGE_ID } from '../constants';
+import { transformIngredientType, transformToUUID } from './utils';
 
 export const retrieveRecipesIDs = async (notion: any, recipeID: string) => {
   let response = await notion.databases.query({
@@ -529,4 +533,158 @@ export const watchRecipesInRedis = async (
     }),
   );
   return notionRecipesIds;
+};
+
+type NotionIngredientSL = {
+  name: string;
+  amount: number;
+  unit: string;
+  id: string;
+  recipeId?: string;
+  category: string; // TODO match the good category
+};
+export const checkOrCreateIngredientShoppingList = async (
+  logger: Logger<never>,
+  notion: any,
+  ingredient: NotionIngredientSL,
+) => {
+  const { id, name, amount, unit, recipeId, category } = ingredient;
+  logger = logger.child({
+    id,
+    name,
+    amount,
+    unit,
+    recipeId,
+    category,
+    function: 'checkOrCreateIngredientShoppingList',
+  });
+  const database_id = SHOPPING_LIST_PAGE_ID;
+  const { results } = (await notion.databases.query({
+    database_id,
+    filter: {
+      property: 'Ingredient',
+      relation: {
+        contains: ingredient.id,
+      },
+    },
+  })) as { results: NotionIngredientShoppingList[] };
+
+  if (results.length > 0) {
+    logger.debug('Ingredient already present in the shopping list');
+    return;
+  }
+  // Retrieve the ingredient id
+  const recipe = {
+    relation: [] as { id: string }[],
+  };
+  if (ingredient.recipeId) {
+    recipe.relation.push({ id: ingredient.recipeId });
+  }
+  notion.pages
+    .create({
+      parent: {
+        type: 'database_id',
+        database_id,
+      },
+      properties: {
+        Name: {
+          title: [
+            {
+              text: {
+                content: ingredient.name,
+              },
+            },
+          ],
+        },
+        Ingredient: {
+          relation: [
+            {
+              id: ingredient.id,
+            },
+          ],
+        },
+        Recipe: recipe,
+        Quantity: {
+          number: ingredient.amount,
+        },
+        Unit: {
+          select: {
+            name: ingredient.unit,
+          },
+        },
+      },
+    })
+    .then((_: any) => {
+      logger.info('Ingredient added in the shopping list');
+    })
+    .catch((err: any) => {
+      logger.child({ err }).error('Error adding ingredient in the shopping list');
+    });
+};
+
+export const populateShoppingList = async (logger: Logger<never>, notion: any) => {
+  logger = logger.child({ function: 'populateShoppingList' });
+  const shoppingList = await getShoppingList();
+
+  const iL = shoppingList.ingredients.map(async (ing) => {
+    const { results } = (await notion.databases.query({
+      database_id: INGREDIENT_DB_ID,
+      filter: {
+        property: 'ID',
+        rich_text: {
+          equals: ing.id,
+        },
+      },
+    })) as { results: NotionIngredient[] };
+    const id = results[0].id;
+    const ingredient = {
+      name: ing.name,
+      amount: ing.amount,
+      unit: ing.unit,
+      id,
+      category: transformIngredientType(ing.type),
+    };
+    checkOrCreateIngredientShoppingList(logger, notion, ingredient);
+  });
+
+  const rL = shoppingList.recipes.map(async (recipe) => {
+    recipe.ingredients.map(async (ing) => {
+      // Retrieve the Notion ID of the Ingredient
+      const { results } = (await notion.databases.query({
+        database_id: INGREDIENT_DB_ID,
+        filter: {
+          property: 'ID',
+          rich_text: {
+            equals: ing.id,
+          },
+        },
+      })) as { results: NotionIngredient[] };
+
+      // Retrieve the Notion ID of the Recipe
+      const { results: recipeResults } = (await notion.databases.query({
+        database_id: RECIPE_DB_ID,
+        filter: {
+          property: 'ID',
+          rich_text: {
+            equals: recipe.id,
+          },
+        },
+      })) as { results: NotionIngredient[] };
+
+      const id = results[0].id;
+      const recipeId = recipeResults[0].id;
+
+      const ingredient = {
+        name: ing.name,
+        amount: ing.amount,
+        unit: ing.unit,
+        id,
+        recipeId,
+        category: transformIngredientType(ing.type),
+      };
+      checkOrCreateIngredientShoppingList(logger, notion, ingredient);
+    });
+  });
+
+  await Promise.all([iL, rL]);
 };

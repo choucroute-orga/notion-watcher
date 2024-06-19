@@ -2,10 +2,24 @@ const { Client } = require('@notionhq/client');
 import * as notion_types from 'notion-types';
 import { IngredientTypes } from './models';
 import { getIngredients } from './api/query';
-import { retrieveRecipesIDs, watchRecipesInNotion, watchRecipesInRedis } from './notion';
-import { IngredientDB, RecipeDB, RedisRecipe, ShoppingListDB, getShoppingListDBProps } from './notion/types';
+import {
+  checkOrCreateIngredientShoppingList,
+  populateShoppingList,
+  retrieveRecipesIDs,
+  watchRecipesInNotion,
+  watchRecipesInRedis,
+} from './notion';
+import {
+  IngredientDB,
+  NotionIngredientShoppingList,
+  RecipeDB,
+  RedisRecipe,
+  ShoppingListDB,
+  getShoppingListDBProps,
+} from './notion/types';
 import { createRedisClient } from './redis';
 import * as pino from 'pino';
+import { LOG_LEVEL, SHOPPING_LIST_PAGE_ID } from './constants';
 // import { retrieveRecipes } from './notion';
 
 const notion = new Client({ auth: process.env.NOTION_API_KEY });
@@ -228,8 +242,8 @@ const main = async () => {
   };
   const recipeJSON = JSON.stringify(redisRecipe);
   await client.set('new_recipe:be867e213c5ad42066da89e5', recipeJSON);
-  await watchRecipesInRedis(logger, notion, client, recipeID, ingID);
-
+  // await watchRecipesInRedis(logger, notion, client, recipeID, ingID);
+  // checkOrCreateIngredientShoppingList(logger, notion, '7149d39c-d8bb-4658-baf4-97e913c67ed4');
   client.disconnect();
 
   // insertIngredients(ingID);
@@ -245,4 +259,15 @@ const main = async () => {
 
 // retrieveRecipesIDs(notion, '49c22ed91a644251ab2e682d771db25f');
 // loop();
-main();
+const l = async () => {
+  const notion = new Client({ auth: process.env.NOTION_API_KEY });
+  const logger = pino.default({
+    level: LOG_LEVEL,
+  });
+  populateShoppingList(logger, notion);
+
+  // Delete the created page
+  // await notion.pages.update({ page_id: results[0].id, archived: true });
+};
+l();
+// main();

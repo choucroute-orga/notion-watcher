@@ -69,6 +69,7 @@ export const IngredientTypes = [
   },
 ];
 
+
 export const IngredientDB = {
   emoji: '🍅',
   title: 'Ingredients List',
@@ -87,23 +88,6 @@ export const IngredientDB = {
   },
 };
 
-type recipeDB = {
-  properties: {
-    Name: {
-      title: {};
-    };
-    Description: {
-      rich_text: {};
-    };
-    'Created time': {
-      created_time: string;
-    };
-    'Last edited time': {
-      last_edited_time: string;
-    };
-  };
-};
-
 const notionText = z.object({
   type: z.enum(['text']),
   text: z.object({
@@ -117,18 +101,6 @@ const notionRichText = z.object({
   type: z.enum(['rich_text']),
   rich_text: z.array(notionText),
 });
-
-const createPropertyObject = (emoji: string, title: string) => {
-  return z.object({
-    [emoji + ' ' + title]: z.object({
-      relation: z.array(
-        z.object({
-          id: z.string(),
-        }),
-      ),
-    }),
-  });
-};
 
 const externalPicture = z.object({
   type: z.enum(['external']),
@@ -297,6 +269,52 @@ export const RecipeDB = {
 export const ShoppingListDB = {
   emoji: '🛒',
   title: 'Shopping List',
+};
+
+export type NotionIngredientShoppingList = {
+  id: string;
+  properties: {
+    Name: {
+      title: z.infer<typeof notionText>[];
+    };
+    Ingredient: {
+      relation: {
+        id: string;
+      }[];
+    };
+    Recipe: {
+      relation: {
+        id: string;
+      }[];
+    };
+    Quantity: {
+      number: {
+        format: 'number';
+      };
+    };
+    'Created time': {
+      created_time: string;
+    };
+    'Last edited time': {
+      last_edited_time: string;
+    };
+    Unit: {
+      select: {
+        options: {
+          name: 'g' | 'kg' | 'unit' | 'tsp' | 'tbsp';
+          color: 'gray';
+        }[];
+      };
+    };
+    Type: {
+      select: {
+        options: {
+          name: string;
+          color: string;
+        }[];
+      };
+    };
+  };
 };
 
 export const getShoppingListDBProps = (ingredientsDBID: string, recipesDBID: string) => ({

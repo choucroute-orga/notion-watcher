@@ -1,7 +1,9 @@
 import { Client } from '@notionhq/client';
 import { describe, it } from 'node:test';
-import { buildIngredientArray } from '../notion';
+import { buildIngredientArray, checkOrCreateIngredientShoppingList } from '../notion';
 import { pino } from 'pino';
+import { SHOPPING_LIST_PAGE_ID } from '../constants';
+import { NotionIngredientShoppingList } from '../notion/types';
 
 describe('Tests related to ingredients', () => {
   test('should parse the ingredient', async () => {
@@ -35,5 +37,41 @@ describe('Tests related to ingredients', () => {
       { id: '634681ea6e8cc8190b10e4bd', amount: 250, unit: 'ml' },
       { id: '5a60f0f6327fe00014912629', amount: 400, unit: 'g' },
     ]);
+  });
+});
+
+describe('checkOrCreateIngredientShoppingList', () => {
+  const notion = new Client({ auth: process.env.NOTION_API_KEY });
+  const logger = pino();
+  const ingredient = {
+    name: 'Pâtes (Linguine)',
+    amount: 100,
+    unit: 'g',
+    id: '770ff6d9f958496db89bd3c12e4fcec9',
+    category: 'Other',
+  };
+
+  it('should create a new shopping list item', async () => {
+    await checkOrCreateIngredientShoppingList(logger, notion, ingredient);
+
+    const database_id = SHOPPING_LIST_PAGE_ID;
+    const { results } = (await notion.databases.query({
+      database_id,
+      filter: {
+        property: 'Ingredient',
+        relation: {
+          contains: ingredient.id,
+        },
+      },
+    })) as unknown as { results: NotionIngredientShoppingList[] };
+
+    // Delete the created page
+    await notion.pages.update({ page_id: results[0].id, archived: true });
+
+    logger.info(results);
+    expect(results.length).toBe(1);
+    const { properties } = results[0];
+    expect(properties.Name.title[0].text.content).toBe(ingredient.name);
+    expect(properties.Quantity.number).toBe(ingredient.amount);
   });
 });

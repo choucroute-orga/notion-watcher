@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import api from './api';
-import { RecipePostRequest, ingredient, recipePostRequest } from './types';
+import { RecipePostRequest, ingredient, recipePostRequest, shoppingListGetResponse } from './types';
 
 export const getIngredients = async () => {
   const res = await api({
@@ -47,4 +47,13 @@ export const putRecipe = async (recipe: RecipePostRequest) => {
     requestSchema: recipePostRequest,
     responseSchema: recipePostRequest,
   })(recipe);
+};
+
+export const getShoppingList = async () => {
+  return await api({
+    method: 'GET',
+    path: '/shopping-list',
+    requestSchema: z.void(),
+    responseSchema: shoppingListGetResponse,
+  })();
 };
